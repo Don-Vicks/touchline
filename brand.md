@@ -1,30 +1,34 @@
 # Brand — Touchline
 
-_Status: revised after the first UI pass_
+_Status: matchday revision_
 
-Touchline is the place you stand during a match. One score dominates the screen. The question sits under it. Chat is the terrace beside the pitch.
+Touchline is the place you stand during a match. Night floodlights, a turf stripe, one score dominating the screen. Chat is the terrace beside the pitch.
 
 ## Palette
 
 | Token | Hex | Use |
 | --- | --- | --- |
-| background | `#090b10` | Night, not a green-tinted crypto black |
-| foreground | `#f6f3ec` | Warm paper white. Also the primary button |
-| card | `#12151c` | Quiet surfaces |
-| pitch | `#13261a` | Only the live scoreboard |
-| muted | `#a7b0bf` | Secondary copy |
-| live | `#ff3b30` | The live lamp only |
-| ink | `#111318` | Text on the paper button |
+| background | `#07140c` | Night pitch |
+| foreground | `#f3efe2` | Programme paper |
+| card | `#102418` | Quiet turf |
+| panel | `#163222` | Inputs, chips |
+| line | `#2f5a3c` | Pitch line |
+| lime | `#c8e87a` | Floodlight accent, primary button |
+| live | `#ff3b30` | Live lamp only |
+| pitch | `#14532d` | Scorebug field |
+| turf | `#1f6b3a` | Stripes and selected league |
+| flood | `#f0e2a8` | Competition kicker on the scorebug |
+| ink | `#07140c` | Text on lime |
 
 ## Type
 
 - UI: Geist
 - Wordmark and page titles: Fraunces
-- Scores, the minute, and prices: Barlow Condensed, tabular numerals
+- Scores, the minute, league labels: Barlow Condensed, tabular numerals, often uppercase
 
 ## Voice
 
-Short, in the room. "Join the room", "Take a side", "Your squad". Do not say bet, odds, wager, or stake.
+Short, in the room. "Join the terrace", "Take a side", "Your squad". Do not say bet, odds, wager, or stake.
 
 ## Layout
 

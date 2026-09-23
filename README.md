@@ -1,6 +1,8 @@
 # Touchline
 
-A social second screen for live football. Fans join a matchroom, form a squad, talk through the match, and take YES/NO sides on what happens next. [Panta](https://docs.panta.market) is the prediction-market rail. Sportmonks is the football feed. Touchline does not invent scores, events, prices, or settlements.
+A social second screen for live football worldwide. Fans join a matchroom, form a squad, talk through the match, and take YES/NO sides on what happens next. [Panta](https://docs.panta.market) is the prediction-market rail. ESPN’s public soccer scoreboard is the default football feed (no API key). Touchline does not invent scores, events, prices, or settlements.
+
+The long-form description of coverage, architecture, and **how in-match markets are generated** is in [PROJECT.md](./PROJECT.md).
 
 ## Layout
 
@@ -33,21 +35,24 @@ Port 3000 is already taken on this machine, so the web app uses 3010. `WEB_ORIGI
 
 | Variable | What it unlocks |
 | --- | --- |
-| `SPORTMONKS_API_TOKEN` | Sportmonks fixtures for the leagues on that key. This key covers Superliga (`271`) and the Scottish Premiership (`501`). |
-| `FOOTBALL_DATA_TOKEN` | Optional [football-data.org](https://www.football-data.org/) feed for Premier League, La Liga, Bundesliga, Serie A, Ligue 1, and Europe. |
-| `API_FOOTBALL_KEY` | Optional [API-Football](https://www.api-football.com/) feed for the same major leagues. |
+| *(none)* | ESPN public scoreboard: big-five Europe, Championship, Eredivisie, Primeira, Scotland, Belgium, Turkey, Denmark, MLS, Liga MX, Brasileirão, Liga Profesional, Saudi Pro League, J1, A-League, Libertadores, Sudamericana, UEFA cups, Nations League. |
+| `THESPORTSDB_API_KEY` | Optional. Defaults to the free test key `3` and fills upcoming/past dates for those same leagues. |
+| `YOUTUBE_API_KEY` | Optional free Google Cloud key. Auto-embeds post-match highlights and rare official YouTube lives. |
+| `FOOTBALL_DATA_TOKEN` | Optional free [football-data.org](https://www.football-data.org/) token (register, no paid plan required) for the same competitions. |
+| `API_FOOTBALL_KEY` | Optional [API-Football](https://www.api-football.com/) key if you already have one. |
+| `SPORTMONKS_API_TOKEN` | Optional extra feed. Only needed if you want leagues that sit on that key. |
 | `PANTA_API_KEY` | Quote, build, and register real USDC markets. |
 | `PANTA_MARKET_IMAGE_URL` | Public https catalog image Panta requires on create. |
 | `PANTA_CREATOR_KEYPAIR_PATH` | Optional operator keypair that signs market-creation transactions. Leave empty and sign them from Desk. User trades are never signed with this key. |
 
-OpenLigaDB covers the Bundesliga and 2. Bundesliga. TheSportsDB adds the next fixture in the Premier League, La Liga, Serie A, Ligue 1, and Europe. Sportmonks adds whatever leagues the token includes. The same match from two feeds is stored once.
+ESPN is the live source. TheSportsDB and OpenLigaDB fill the calendar without a paid plan. Optional tokens merge on top. The same match from two feeds is stored once. Fixtures sort by kickoff across every tracked league.
 
 Without a Panta key, matchrooms, squads, and chat still run, and markets stay non-tradable with “Markets temporarily unavailable.” No fake prices are shown.
 
 ## Golden path
 
 1. Sign up and create a squad.
-2. A live fixture arrives from Sportmonks and opens a matchroom.
+2. A live fixture arrives from the football feeds and opens a matchroom.
 3. People join and chat over Socket.IO.
 4. A corner or goal is stored once (provider event id). The market engine proposes a binary question.
 5. Panta quote → build → wallet sign → broadcast → register. The market id on the row is Panta’s.
