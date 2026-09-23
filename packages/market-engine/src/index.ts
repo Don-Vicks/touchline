@@ -63,7 +63,7 @@ export interface ValidationResult {
 
 export type Observed = "yes" | "no" | "pending";
 
-const SOURCE = "Sportmonks football fixture events";
+const SOURCE = "Official match event feed";
 
 const BANNED =
   /\b(embarrass(?:es|ed|ing)?|dominate[sd]?|unlucky|beautiful|disgrace|bottle[sd]?|deserved|momentum|classy|worldie)\b/i;

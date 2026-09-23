@@ -24,6 +24,15 @@ export const profileSchema = z.object({
   avatarUrl: z.string().url().max(500).nullable().optional(),
 });
 
+export const passwordChangeSchema = z.object({
+  currentPassword: z.string().min(1).max(200),
+  newPassword: z.string().min(8).max(200),
+});
+
+export const avatarUploadSchema = z.object({
+  image: z.string().regex(/^data:image\/(jpeg|png|webp);base64,/, "Use a JPEG, PNG, or WebP photo."),
+});
+
 export const walletVerifySchema = z.object({
   address: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),
   message: z.string().min(10).max(500),

@@ -1,10 +1,11 @@
 import type { DomainFixture } from "@touchline/football-domain";
 
 const RANK: Record<string, number> = {
-  sportmonks: 4,
+  espn: 5,
   "api-football": 4,
+  sportmonks: 4,
   "football-data": 3,
-  openligadb: 3,
+  openligadb: 2,
   thesportsdb: 1,
 };
 

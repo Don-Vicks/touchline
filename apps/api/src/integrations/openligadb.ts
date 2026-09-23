@@ -2,7 +2,7 @@ import { FootballProviderUnavailable, type DomainEvent, type DomainFixture, type
 
 type Json = Record<string, unknown>;
 
-const LEAGUES = ["bl1", "bl2"];
+const LEAGUES = ["bl1"];
 
 function str(value: unknown) {
   return typeof value === "string" && value.trim() ? value : null;

@@ -39,6 +39,24 @@ export interface DomainPlayer {
   imageUrl: string | null;
   teamProviderId: string | null;
   jersey: number | null;
+  starter?: boolean;
+  position?: string | null;
+  grid?: string | null;
+}
+
+export interface DomainBroadcast {
+  name: string;
+  type: string | null;
+  url: string | null;
+}
+
+export interface DomainVideo {
+  kind: "HIGHLIGHT" | "LIVE";
+  title: string;
+  url: string;
+  provider: string;
+  externalId: string | null;
+  channelTitle?: string | null;
 }
 
 export interface DomainEvent {
@@ -68,6 +86,10 @@ export interface DomainFixture {
   seasonName: string | null;
   round: string | null;
   venue: string | null;
+  venueCity?: string | null;
+  referee?: string | null;
+  officials?: { name: string; role: string }[];
+  attendance?: number | null;
   kickoffAt: string;
   status: DomainMatchStatus;
   providerState: string | null;
@@ -84,6 +106,10 @@ export interface DomainFixture {
   events: DomainEvent[];
   lineups: DomainPlayer[];
   statistics: DomainStat[];
+  broadcasts?: DomainBroadcast[];
+  videos?: DomainVideo[];
+  homeFormation?: string | null;
+  awayFormation?: string | null;
 }
 
 export interface FootballDataProvider {

@@ -224,8 +224,41 @@ model Player {
   team       Team?   @relation(fields: [teamId], references: [id])
   name       String
   imageUrl   String?
+  lineups    MatchLineup[]
 
   @@unique([provider, providerId])
+}
+
+model MatchLineup {
+  id       String  @id @default(cuid())
+  matchId  String
+  match    Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  teamId   String
+  playerId String
+  player   Player  @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  starter  Boolean @default(false)
+  position String?
+  jersey   Int?
+  grid     String?
+
+  @@unique([matchId, playerId])
+  @@index([matchId, teamId])
+}
+
+model MatchVideo {
+  id         String  @id @default(cuid())
+  matchId    String
+  match      Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  kind       String
+  provider   String
+  externalId String?
+  title      String
+  url        String
+  embeddable Boolean @default(true)
+  featured   Boolean @default(false)
+
+  @@unique([matchId, provider, url])
+  @@index([matchId, kind])
 }
 
 model Match {
@@ -250,6 +283,10 @@ model Match {
   htHomeScore   Int?
   htAwayScore   Int?
   venue         String?
+  venueCity     String?
+  referee       String?
+  officials     Json?
+  attendance    Int?
   round         String?
   lengthMin     Int?
   providerState String?
@@ -260,6 +297,12 @@ model Match {
   matchroom Matchroom?
   events    FootballEvent[]
   markets   Market[]
+  lineups   MatchLineup[]
+  videos    MatchVideo[]
+  broadcasts String[] @default([])
+  homeFormation String?
+  awayFormation String?
+  highlightSearchedAt DateTime?
 
   @@unique([provider, providerId])
   @@index([status, kickoffAt])
@@ -271,6 +314,7 @@ model Matchroom {
   matchId   String   @unique
   match     Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
   disabled  Boolean  @default(false)
+  watchUrl  String?
   createdAt DateTime @default(now())
 
   members  MatchroomMember[]
@@ -385,6 +429,8 @@ model Prediction {
   pantaQuoteId String?
   pantaOrderId String?
   signature    String?
+  claimedAt    DateTime?
+  claimSignature String?
   result       PositionResult   @default(PENDING)
   xpAwarded    Int              @default(0)
   isLive       Boolean          @default(false)
