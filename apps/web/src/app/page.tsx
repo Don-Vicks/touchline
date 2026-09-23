@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
+import { Kit } from "@/components/kit";
 import { Scorebug } from "@/components/scorebug";
 import { Empty, ErrorState, ProviderNote, Skeleton } from "@/components/states";
 import { api } from "@/lib/api";
@@ -25,8 +26,8 @@ export default function HomePage() {
 
   return (
     <div>
-      <p className="text-sm text-muted">{greeting(data.user?.displayName)}</p>
-      <h1 className="mt-2 font-serif text-5xl tracking-tight md:text-6xl">{data.live.length ? "On now" : "Up next"}</h1>
+      <p className="kicker">{greeting(data.user?.displayName)} · Matchday</p>
+      <h1 className="mt-2 font-serif text-5xl tracking-tight md:text-6xl">{data.live.length ? "On the pitch" : "Next kickoff"}</h1>
       <div className="mt-6">
         <ProviderNote football={data.provider.football} panta={data.provider.panta} />
       </div>
@@ -37,7 +38,7 @@ export default function HomePage() {
           ) : (
             <Empty
               title="The grounds are quiet"
-              body="The next kickoff from your football plan shows up here. Nothing is filled in while the feed is empty."
+              body="The next kickoff from any tracked league worldwide shows up here."
               action={
                 <Link href="/matches" className="focus-ring inline-flex min-h-11 items-center text-sm underline">
                   Browse the list
@@ -48,6 +49,7 @@ export default function HomePage() {
           {rest.length ? (
             <div className="mt-8">
               <h2 className="font-serif text-2xl">Also this week</h2>
+              <p className="kicker mt-1">Fixtures</p>
               <div className="mt-2">
                 {rest.map((match) => (
                   <Scorebug key={match.id} match={match} href={`/match/${match.id}`} variant="row" />
@@ -69,6 +71,7 @@ export default function HomePage() {
         <aside className="space-y-10">
           <section>
             <h2 className="font-serif text-2xl">Your squad</h2>
+            <p className="kicker mt-1">Dressing room</p>
             {data.squad ? (
               <Link href={`/squads/${data.squad.id}`} className="focus-ring mt-3 block">
                 <p className="text-xl">{data.squad.name}</p>
@@ -97,9 +100,17 @@ export default function HomePage() {
                       <Link href={`/match/${market.matchId}`} className="focus-ring block">
                         <p className="leading-snug">{market.question}</p>
                         <p className="mt-1 font-display text-2xl tabular-nums">
-                          <span aria-label={`Yes ${yes.label}`}>{yes.text}</span>
-                          <span className="px-2 text-muted">/</span>
-                          <span aria-label={`No ${no.label}`}>{no.text}</span>
+                          {market.xpOnly ? (
+                            <span>
+                              {market.yesCalls ?? 0} yes / {market.noCalls ?? 0} no
+                            </span>
+                          ) : (
+                            <>
+                              <span aria-label={`Yes ${yes.label}`}>{yes.text}</span>
+                              <span className="px-2 text-muted">/</span>
+                              <span aria-label={`No ${no.label}`}>{no.text}</span>
+                            </>
+                          )}
                         </p>
                       </Link>
                     </li>
@@ -113,12 +124,13 @@ export default function HomePage() {
           <section>
             <h2 className="font-serif text-2xl">Ranks</h2>
             {data.leaders.length ? (
-              <ol className="mt-3 space-y-2">
+              <ol className="mt-3">
                 {data.leaders.slice(0, 5).map((fan) => (
-                  <li key={fan.id} className="flex items-baseline justify-between gap-3 text-sm">
-                    <span>
-                      <span className="mr-2 font-display text-lg tabular-nums text-muted">{fan.rank}</span>
-                      {fan.displayName}
+                  <li key={fan.id} className="flex items-center justify-between gap-3 border-b border-line/70 py-2 text-sm">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="w-6 font-display text-lg tabular-nums text-lime">{fan.rank}</span>
+                      <Kit name={fan.displayName} imageUrl={fan.avatarUrl} seed={fan.username} size="sm" />
+                      <span className="truncate">{fan.displayName}</span>
                     </span>
                     <span className="font-display tabular-nums">{formatXp(fan.xp)}</span>
                   </li>

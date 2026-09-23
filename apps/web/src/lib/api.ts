@@ -17,11 +17,16 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (init?.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const token = csrf();
   if (token) headers.set("X-CSRF-Token", token);
-  const response = await fetch(`${API_URL}/api/v1${path}`, {
-    ...init,
-    headers,
-    credentials: "include",
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/api/v1${path}`, {
+      ...init,
+      headers,
+      credentials: "include",
+    });
+  } catch {
+    throw new ApiError("The match feed is offline. Start the API on port 4000 (`pnpm dev:api`) and try again.", 0);
+  }
   const data = (await response.json().catch(() => ({}))) as { error?: string };
   if (!response.ok) throw new ApiError(data.error ?? "Something went wrong.", response.status);
   return data as T;

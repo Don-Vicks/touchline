@@ -33,8 +33,9 @@ export default function LoginPage() {
 
   return (
     <form onSubmit={(event) => void submit(event)} className="mx-auto max-w-md space-y-4">
+      <p className="kicker">Season ticket</p>
       <h1 className="font-serif text-5xl tracking-tight">Sign in</h1>
-      <p className="text-sm text-muted">Browse matches without a wallet. Connect one when you take a side.</p>
+      <p className="text-sm text-muted">Walk in without a wallet. Connect one when you take a side.</p>
       <label className="block text-sm" htmlFor="email">
         Email
         <input id="email" name="email" type="email" autoComplete="email" required className="focus-ring mt-1 min-h-11 w-full bg-panel px-3" />
@@ -48,7 +49,7 @@ export default function LoginPage() {
           {error}
         </p>
       ) : null}
-      <button type="submit" disabled={pending} className="focus-ring min-h-11 bg-foreground px-4 text-sm font-medium text-ink">
+      <button type="submit" disabled={pending} className="focus-ring min-h-11 bg-lime px-4 font-display text-sm uppercase tracking-[0.12em] text-ink disabled:opacity-50">
         {pending ? "Signing in…" : "Sign in"}
       </button>
       <p className="text-sm text-muted">

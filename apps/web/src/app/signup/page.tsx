@@ -38,6 +38,7 @@ export default function SignupPage() {
 
   return (
     <form onSubmit={(event) => void submit(event)} className="mx-auto max-w-md space-y-4">
+      <p className="kicker">Get a shirt</p>
       <h1 className="font-serif text-5xl tracking-tight">Create a profile</h1>
       <label className="block text-sm" htmlFor="displayName">
         Name
@@ -60,7 +61,7 @@ export default function SignupPage() {
           {error}
         </p>
       ) : null}
-      <button type="submit" disabled={pending} className="focus-ring min-h-11 bg-foreground px-4 text-sm font-medium text-ink">
+      <button type="submit" disabled={pending} className="focus-ring min-h-11 bg-lime px-4 font-display text-sm uppercase tracking-[0.12em] text-ink disabled:opacity-50">
         {pending ? "Creating…" : "Create profile"}
       </button>
       <p className="text-sm text-muted">

@@ -22,6 +22,7 @@ export function MarketPanel({ market, signedIn }: { market: MarketCard | null; s
   const [pending, setPending] = useState<"yes" | "no" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const [receipt, setReceipt] = useState<string | null>(null);
 
   if (!market) {
     return (
@@ -39,8 +40,21 @@ export function MarketPanel({ market, signedIn }: { market: MarketCard | null; s
   async function take(side: "yes" | "no") {
     setError(null);
     setDone(null);
+    setReceipt(null);
     if (!signedIn) {
       window.location.href = "/login";
+      return;
+    }
+    if (market?.xpOnly) {
+      setPending(side);
+      try {
+        await api(`/markets/${market.id}/call`, { method: "POST", body: JSON.stringify({ side }) });
+        setDone(`${side === "yes" ? "YES" : "NO"} is in. XP only until Panta USDC is live.`);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Could not take a side.");
+      } finally {
+        setPending(null);
+      }
       return;
     }
     if (!me.data?.user?.walletAddress) {
@@ -94,11 +108,12 @@ export function MarketPanel({ market, signedIn }: { market: MarketCard | null; s
         { signature, blockhash: built.recentBlockhash, lastValidBlockHeight: built.lastValidBlockHeight },
         "confirmed",
       );
-      await api(`/markets/${market!.id}/submit`, {
+      const submitted = await api<{ explorerUrl?: string }>(`/markets/${market!.id}/submit`, {
         method: "POST",
         body: JSON.stringify({ orderId: built.orderId, signature }),
       });
       setDone(`${side === "yes" ? "YES" : "NO"} is in. ${formatUsdc(amount)} USDC.`);
+      if (submitted.explorerUrl) setReceipt(submitted.explorerUrl);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Markets temporarily unavailable.");
     } finally {
@@ -113,38 +128,42 @@ export function MarketPanel({ market, signedIn }: { market: MarketCard | null; s
         {market.outcome ? <p className="text-foreground">Settled {market.outcome.toUpperCase()}</p> : null}
       </div>
       <h2 className="mt-3 max-w-xl font-serif text-4xl leading-[1.05] tracking-tight md:text-5xl">{market.question}</h2>
-      {market.tradable ? (
+      {market.tradable || market.xpOnly ? (
         <>
           <div className="mt-6 grid grid-cols-2">
-            <button type="button" disabled={pending != null} onClick={() => take("yes")} className="focus-ring min-h-20 bg-foreground px-4 py-3 text-left text-ink disabled:opacity-60">
+            <button type="button" disabled={pending != null} onClick={() => take("yes")} className="focus-ring min-h-20 bg-lime px-4 py-3 text-left text-ink disabled:opacity-60">
               <span className="block text-sm">Yes</span>
-              <span className="font-display text-4xl tabular-nums" aria-label={yes.label}>
-                {yes.text}
+              <span className="font-display text-4xl tabular-nums" aria-label={market.xpOnly ? "Yes" : yes.label}>
+                {market.xpOnly ? "YES" : yes.text}
               </span>
             </button>
             <button type="button" disabled={pending != null} onClick={() => take("no")} className="focus-ring min-h-20 border border-l-0 border-line px-4 py-3 text-left disabled:opacity-60">
               <span className="block text-sm text-muted">No</span>
-              <span className="font-display text-4xl tabular-nums" aria-label={no.label}>
-                {no.text}
+              <span className="font-display text-4xl tabular-nums" aria-label={market.xpOnly ? "No" : no.label}>
+                {market.xpOnly ? "NO" : no.text}
               </span>
             </button>
           </div>
+          {market.xpOnly ? null : (
           <div className="mt-4 flex gap-2" role="group" aria-label="USDC amount">
             {chips.map((chip) => (
               <button
                 key={chip}
                 type="button"
                 onClick={() => setAmount(chip)}
-                className={`focus-ring min-h-11 min-w-11 px-3 text-sm tabular-nums ${amount === chip ? "bg-foreground text-ink" : "bg-panel"}`}
+                className={`focus-ring min-h-11 min-w-11 px-3 font-display text-sm tabular-nums ${amount === chip ? "bg-lime text-ink" : "bg-panel"}`}
               >
                 ${chip}
               </button>
             ))}
           </div>
-          <p className="mt-3 text-sm text-muted">Panta settles the USDC. XP follows the call, not the size.</p>
+          )}
+          <p className="mt-3 text-sm text-muted">
+            {market.xpOnly ? "XP only until Panta is live. Take a side." : "Panta settles the USDC. XP follows the call, not the size."}
+          </p>
         </>
       ) : (
-        <p className="mt-5 text-sm text-muted">{market.failureReason ?? "Markets temporarily unavailable."}</p>
+        <p className="mt-5 text-sm text-muted">{market.failureReason ?? "This call is closed."}</p>
       )}
       {error ? (
         <p className="mt-3 text-sm text-live" role="alert">
@@ -154,6 +173,14 @@ export function MarketPanel({ market, signedIn }: { market: MarketCard | null; s
       {done ? (
         <p className="mt-3 text-sm" role="status">
           {done}
+          {receipt ? (
+            <>
+              {" "}
+              <a href={receipt} target="_blank" rel="noreferrer" className="focus-ring text-lime underline">
+                On-chain receipt
+              </a>
+            </>
+          ) : null}
         </p>
       ) : null}
       {pending ? <p className="mt-3 text-sm text-muted">Waiting on your wallet…</p> : null}

@@ -18,7 +18,7 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
       <p className="font-serif text-3xl tracking-tight">Couldn’t load this</p>
       <p className="mt-2 text-sm text-muted">{message}</p>
       {onRetry ? (
-        <button type="button" onClick={onRetry} className="focus-ring mt-4 min-h-11 bg-foreground px-4 text-sm text-ink">
+        <button type="button" onClick={onRetry} className="focus-ring mt-4 min-h-11 bg-lime px-4 font-display text-sm uppercase tracking-[0.12em] text-ink">
           Try again
         </button>
       ) : null}

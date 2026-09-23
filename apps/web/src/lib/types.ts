@@ -25,6 +25,10 @@ export interface MatchCard {
   clock: string;
   kickoffAt: string;
   venue: string | null;
+  venueCity: string | null;
+  referee: string | null;
+  officials: { name: string; role: string }[];
+  attendance: number | null;
   round: string | null;
   homeScore: number;
   awayScore: number;
@@ -52,7 +56,14 @@ export interface MarketCard {
   closesAt: string;
   failureReason: string | null;
   tradable: boolean;
+  xpOnly?: boolean;
   sourceEventId?: string | null;
+  resolutionRule?: string | null;
+  yesCalls?: number;
+  noCalls?: number;
+  mySide?: string | null;
+  squadYes?: number;
+  squadNo?: number;
 }
 
 export interface ChatLine {
@@ -62,6 +73,37 @@ export interface ChatLine {
   createdAt: string;
   user: Fan;
   replyToId?: string | null;
+  replyTo?: { id: string; body: string; user: { displayName: string } } | null;
+  meta?: { explorerUrl?: string; signature?: string; side?: string } | null;
+}
+
+export interface WatchShare {
+  provider: "youtube" | "twitch" | "hls";
+  source: string;
+  youtubeId?: string;
+  twitchChannel?: string;
+  hlsUrl?: string;
+}
+
+export interface WatchVideo {
+  id: string;
+  kind: string;
+  title: string;
+  url: string;
+  provider: string;
+  externalId: string | null;
+  embeddable: boolean;
+  featured?: boolean;
+}
+
+export interface LineupPlayer {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+  starter: boolean;
+  position: string | null;
+  jersey: number | null;
+  grid: string | null;
 }
 
 export interface FeedEvent {
@@ -72,6 +114,7 @@ export interface FeedEvent {
   extraMinute: number | null;
   playerName: string | null;
   teamProviderId: string | null;
+  teamName?: string | null;
   detail: string | null;
 }
 
@@ -87,5 +130,5 @@ export interface HomePayload {
 }
 
 export interface MePayload {
-  user: (Fan & { email: string; role: string; walletAddress: string | null; bio: string | null; bestStreak?: number }) | null;
+  user: (Fan & { email: string; role: string; walletAddress: string | null; bio: string | null; bestStreak?: number; unreadCount?: number }) | null;
 }
