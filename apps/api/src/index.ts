@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
+
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
@@ -15,11 +16,13 @@ import { startRealtimeBridge } from "./realtime";
 import { attachSocket } from "./socket";
 import { ensureTemplates } from "./services/markets";
 import { startWorkers } from "./workers";
+import { avatarDir } from "./avatars";
 
 const app = express();
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+app.use("/avatars", express.static(avatarDir, { maxAge: "7d" }));
 app.use(
   cors({
     origin: config.webOrigin,
@@ -36,7 +39,7 @@ app.use((req, res, next) => {
   next();
 });
 app.use("/api/v1/webhooks", express.raw({ type: "application/json", limit: "1mb" }), webhooks);
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "2mb" }));
 app.use("/api/v1", async (req, res, next) => {
   const key = `rl:ip:${req.ip}`;
   const count = await redis.incr(key);

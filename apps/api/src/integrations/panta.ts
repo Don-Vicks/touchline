@@ -211,6 +211,25 @@ export class PantaClient {
     });
   }
 
+  async buildWinClaim(input: { wallet: string; marketId: string }) {
+    return this.request<{
+      wallet: string;
+      marketId: string;
+      outcome?: string;
+      winningShares?: string;
+      instructions: PantaInstruction[];
+      recentBlockhash: string;
+      lastValidBlockHeight: number;
+    }>("claim/build", { method: "POST", body: JSON.stringify(input) });
+  }
+
+  async reportClaim(input: { signature: string; wallet: string; marketId: string }) {
+    return this.request<{ status?: string }>("trades", {
+      method: "POST",
+      body: JSON.stringify({ kind: "claim", signature: input.signature, wallet: input.wallet, marketId: input.marketId }),
+    });
+  }
+
   async getPositions(wallet: string): Promise<PantaPosition[]> {
     const body = await this.request<{ positions?: Record<string, unknown>[] }>("positions", undefined, { wallet });
     return (body.positions ?? []).map((row) => {

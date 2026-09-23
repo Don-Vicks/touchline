@@ -1,6 +1,7 @@
 import { formatClock, type DomainMatchStatus } from "@touchline/football-domain";
+import { displayCompetition, flagUrl, soccerCrestUrl } from "./integrations/leagues";
 
-type Team = { id: string; name: string; shortCode: string | null; imageUrl: string | null };
+type Team = { id: string; name: string; shortCode: string | null; imageUrl: string | null; providerId?: string };
 type MatchRow = {
   id: string;
   status: string;
@@ -9,6 +10,10 @@ type MatchRow = {
   second: number | null;
   kickoffAt: Date;
   venue: string | null;
+  venueCity?: string | null;
+  referee?: string | null;
+  officials?: unknown;
+  attendance?: number | null;
   round: string | null;
   homeScore: number;
   awayScore: number;
@@ -24,7 +29,7 @@ const team = (row: Team) => ({
   id: row.id,
   name: row.name,
   shortCode: row.shortCode,
-  imageUrl: row.imageUrl,
+  imageUrl: row.imageUrl ?? soccerCrestUrl(row.providerId) ?? flagUrl(row.shortCode),
 });
 
 export function matchJson(match: MatchRow, watching = 0) {
@@ -38,12 +43,16 @@ export function matchJson(match: MatchRow, watching = 0) {
     clock: formatClock(match.minute, match.extraMinute, status),
     kickoffAt: match.kickoffAt.toISOString(),
     venue: match.venue,
+    venueCity: match.venueCity ?? null,
+    referee: match.referee ?? null,
+    officials: Array.isArray(match.officials) ? match.officials : [],
+    attendance: match.attendance ?? null,
     round: match.round,
     homeScore: match.homeScore,
     awayScore: match.awayScore,
     htHomeScore: match.htHomeScore,
     htAwayScore: match.htAwayScore,
-    competition: match.competition,
+    competition: { ...match.competition, name: displayCompetition(match.competition.name) },
     home: team(match.homeTeam),
     away: team(match.awayTeam),
     watching,
@@ -67,8 +76,19 @@ export function marketJson(market: {
   failureReason: string | null;
   disabled: boolean;
   sourceEventId?: string | null;
+  resolutionRule?: string;
+  yesCalls?: number;
+  noCalls?: number;
+  mySide?: string | null;
+  squadYes?: number;
+  squadNo?: number;
 }) {
   const tradable = Boolean(market.pantaMarketId) && !market.disabled && (market.status === "OPEN" || market.status === "TRADING");
+  const xpOnly =
+    !market.pantaMarketId &&
+    !market.disabled &&
+    (market.status === "PENDING" || market.status === "OPEN" || market.status === "TRADING" || market.status === "AWAITING_SIGNATURE") &&
+    !market.outcome;
   return {
     id: market.id,
     matchId: market.matchId,
@@ -82,9 +102,16 @@ export function marketJson(market: {
     evidence: market.evidence,
     pantaMarketId: market.pantaMarketId,
     closesAt: market.endTime.toISOString(),
-    failureReason: tradable ? null : market.failureReason,
+    failureReason: tradable || xpOnly ? null : market.failureReason,
     tradable,
+    xpOnly,
     sourceEventId: market.sourceEventId ?? null,
+    resolutionRule: market.resolutionRule ?? null,
+    yesCalls: market.yesCalls ?? 0,
+    noCalls: market.noCalls ?? 0,
+    mySide: market.mySide ?? null,
+    squadYes: market.squadYes ?? 0,
+    squadNo: market.squadNo ?? 0,
   };
 }
 

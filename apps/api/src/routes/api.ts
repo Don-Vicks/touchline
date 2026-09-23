@@ -1,3 +1,5 @@
+import { readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { Router, type Request, type Response } from "express";
 import { PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
@@ -11,6 +13,8 @@ import {
   joinCodeSchema,
   loginSchema,
   muteSchema,
+  avatarUploadSchema,
+  passwordChangeSchema,
   profileSchema,
   quoteBuySchema,
   registerMarketSchema,
@@ -20,6 +24,12 @@ import {
   walletVerifySchema,
 } from "@touchline/validation";
 import { z } from "zod";
+import { FEATURED_COMPETITIONS, competitionWeight, isFeaturedCompetition, playerHeadshotUrl } from "../integrations/leagues";
+import { parseWatchUrl } from "../integrations/watch";
+import { officialWatchFor } from "../integrations/official-watch";
+import { enrichMatchDetail } from "../services/football-sync";
+import { explorerTxUrl } from "../lib/explorer";
+import { avatarDir, avatarPublicUrl } from "../avatars";
 import {
   CSRF_COOKIE,
   SESSION_COOKIE,
@@ -37,7 +47,8 @@ import { presenceCount } from "../realtime";
 import { marketJson, matchJson, userSelect } from "../serialize";
 import { postMessage } from "../services/chat";
 import { notify } from "../services/notify";
-import { beginCreate, buildForUser, finishCreate, quoteForUser, submitForUser } from "../services/markets";
+import { beginCreate, buildForUser, buildWinClaimForUser, finishCreate, paperCall, quoteForUser, submitForUser, submitWinClaimForUser, syncPrematch } from "../services/markets";
+import { panta } from "../integrations/panta";
 import { syncLive, syncWindow } from "../services/football-sync";
 import { logger } from "../logger";
 
@@ -167,12 +178,14 @@ router.get("/auth/me", async (_req, res) => {
   const session = res.locals.auth ? auth(res) : null;
   if (!session) return res.json({ user: null });
   const rank = await rankOfUser(session.user.id, session.user.xp);
+  const unread = await prisma.notification.count({ where: { userId: session.user.id, readAt: null } });
   res.json({
     user: {
       ...session.user,
       passwordHash: undefined,
       rank,
       walletAddress: session.user.wallets[0]?.address ?? null,
+      unreadCount: unread,
     },
   });
 });
@@ -215,6 +228,36 @@ router.patch("/users/me", requireUser, async (req, res) => {
   res.json({ user });
 });
 
+router.post("/users/me/password", requireUser, async (req, res) => {
+  const body = parse(passwordChangeSchema, req.body, res);
+  if (!body) return;
+  const user = await prisma.user.findUnique({ where: { id: auth(res).user.id } });
+  if (!user || !(await checkPassword(body.currentPassword, user.passwordHash))) {
+    return fail(res, 400, "Current password is wrong.");
+  }
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(body.newPassword) } });
+  res.json({ ok: true });
+});
+
+router.post("/users/me/avatar", requireUser, async (req, res) => {
+  const body = parse(avatarUploadSchema, req.body, res);
+  if (!body) return;
+  const match = body.image.match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) return fail(res, 400, "Use a JPEG, PNG, or WebP photo.");
+  const ext = match[1] === "jpeg" ? "jpg" : match[1];
+  const buf = Buffer.from(match[2] ?? "", "base64");
+  if (buf.length > 400_000) return fail(res, 400, "Photo must be under 400KB.");
+  const userId = auth(res).user.id;
+  for (const file of readdirSync(avatarDir)) {
+    if (file.startsWith(`${userId}.`)) unlinkSync(path.join(avatarDir, file));
+  }
+  writeFileSync(path.join(avatarDir, `${userId}.${ext}`), buf);
+  const host = `${req.protocol}://${req.get("host") ?? "localhost:4000"}`;
+  const avatarUrl = avatarPublicUrl(host, userId, ext ?? "jpg");
+  const user = await prisma.user.update({ where: { id: userId }, data: { avatarUrl }, select: userSelect });
+  res.json({ user });
+});
+
 router.get("/users/:id", async (req, res) => {
   const user = await prisma.user.findFirst({
     where: { OR: [{ id: req.params.id }, { username: req.params.id.toLowerCase() }], bannedAt: null },
@@ -236,7 +279,7 @@ router.get("/home", async (_req, res) => {
       where: { status: { in: ["LIVE", "HALFTIME"] } },
       include: matchInclude,
       orderBy: { kickoffAt: "desc" },
-      take: 6,
+      take: 20,
     }),
     prisma.match.findMany({
       where: { status: "FINISHED", kickoffAt: { gte: new Date(Date.now() - 14 * 24 * 60 * 60_000) } },
@@ -248,12 +291,13 @@ router.get("/home", async (_req, res) => {
       where: { status: "SCHEDULED", kickoffAt: { gte: new Date(), lte: new Date(Date.now() + 21 * 24 * 60 * 60_000) } },
       include: matchInclude,
       orderBy: { kickoffAt: "asc" },
-      take: 6,
+      take: 24,
     }),
     prisma.market.findMany({
-      where: { status: { in: ["OPEN", "TRADING"] }, disabled: false, pantaMarketId: { not: null } },
+      where: { status: { in: ["OPEN", "TRADING", "PENDING"] }, disabled: false },
       orderBy: { updatedAt: "desc" },
-      take: 4,
+      take: 5,
+      include: { predictions: { where: { status: { in: ["CONFIRMED", "SUBMITTED"] } }, select: { side: true } } },
     }),
     prisma.user.findMany({ where: { bannedAt: null }, orderBy: [{ xp: "desc" }, { id: "asc" }], take: 8, select: userSelect }),
     prisma.providerHealth.findMany(),
@@ -271,13 +315,22 @@ router.get("/home", async (_req, res) => {
   }
   const withWatching = async (rows: typeof live) =>
     Promise.all(rows.map(async (row) => matchJson(row, row.matchroom ? await presenceCount(row.matchroom.id) : 0)));
+  const playable = (rows: typeof live) => rows.filter((row) => isFeaturedCompetition(row.competition.name));
+  const byKickoff = (rows: typeof live) =>
+    [...rows].sort((a, b) => a.kickoffAt.getTime() - b.kickoffAt.getTime() || competitionWeight(a.competition.name) - competitionWeight(b.competition.name));
   res.json({
     user: user ? { displayName: user.displayName, username: user.username, xp: user.xp, rank: await rankOfUser(user.id, user.xp) } : null,
-    live: await withWatching(live),
-    recent: await withWatching(recent),
-    soon: await withWatching(soon),
+    live: await withWatching(byKickoff(playable(live)).slice(0, 6)),
+    recent: await withWatching(playable(recent)),
+    soon: await withWatching(byKickoff(playable(soon)).slice(0, 8)),
     squad: squad ? { id: squad.squad.id, name: squad.squad.name, xp: squad.squad.xp, rank: squadRank, members: await prisma.squadMember.count({ where: { squadId: squad.squad.id } }) } : null,
-    trending: trending.map(marketJson),
+    trending: trending.map((row) =>
+      marketJson({
+        ...row,
+        yesCalls: row.predictions.filter((p) => p.side === "YES").length,
+        noCalls: row.predictions.filter((p) => p.side === "NO").length,
+      }),
+    ),
     leaders: leaders.map((row, index) => ({ ...row, rank: index + 1 })),
     provider: {
       football: health.some((row) => row.id !== "panta" && row.status === "up")
@@ -293,7 +346,10 @@ router.get("/home", async (_req, res) => {
 
 router.get("/competitions", async (_req, res) => {
   const competitions = await prisma.competition.findMany({ orderBy: { name: "asc" } });
-  res.json({ competitions });
+  res.json({
+    competitions: [...competitions].sort((a, b) => competitionWeight(a.name) - competitionWeight(b.name)),
+    featured: FEATURED_COMPETITIONS.map((row) => ({ id: row.id, label: row.label })),
+  });
 });
 
 router.get("/teams", async (req, res) => {
@@ -336,14 +392,25 @@ router.get("/matches", async (req, res) => {
   if (when === "today") where.kickoffAt = { gte: start, lt: new Date(start.getTime() + day) };
   if (when === "tomorrow") where.kickoffAt = { gte: new Date(start.getTime() + day), lt: new Date(start.getTime() + 2 * day) };
   if (typeof req.query.competitionId === "string") where.competitionId = req.query.competitionId;
+  const leagueSlug = typeof req.query.league === "string" ? req.query.league : "";
+  const featured = FEATURED_COMPETITIONS.find((row) => row.id === leagueSlug);
   if (typeof req.query.teamId === "string") where.OR = [{ homeTeamId: req.query.teamId }, { awayTeamId: req.query.teamId }];
-  const matches = await prisma.match.findMany({ where, include: matchInclude, orderBy: [{ status: "asc" }, { kickoffAt: "asc" }], take: 60 });
-  const ranked = [...matches].sort((a, b) => {
+  const matches = await prisma.match.findMany({ where, include: matchInclude, orderBy: [{ status: "asc" }, { kickoffAt: "asc" }], take: 160 });
+  const scoped = matches.filter((row) => {
+    if (!isFeaturedCompetition(row.competition.name)) return false;
+    if (featured && !featured.match.test(row.competition.name)) return false;
+    return true;
+  });
+  const ranked = [...scoped].sort((a, b) => {
     const weight = (status: string) => (status === "LIVE" || status === "HALFTIME" ? 0 : status === "SCHEDULED" ? 1 : 2);
-    return weight(a.status) - weight(b.status) || a.kickoffAt.getTime() - b.kickoffAt.getTime();
+    return (
+      weight(a.status) - weight(b.status) ||
+      a.kickoffAt.getTime() - b.kickoffAt.getTime() ||
+      competitionWeight(a.competition.name) - competitionWeight(b.competition.name)
+    );
   });
   res.json({
-    matches: await Promise.all(ranked.map(async (row) => matchJson(row, row.matchroom ? await presenceCount(row.matchroom.id) : 0))),
+    matches: await Promise.all(ranked.slice(0, 80).map(async (row) => matchJson(row, row.matchroom ? await presenceCount(row.matchroom.id) : 0))),
   });
 });
 
@@ -383,19 +450,26 @@ router.get("/matches/:id/stats", async (req, res) => {
 });
 
 router.get("/matches/:id/room", async (req, res) => {
-  const match = await prisma.match.findUnique({ where: { id: req.params.id }, include: { ...matchInclude, events: { orderBy: [{ minute: "asc" }] } } });
+  await enrichMatchDetail(req.params.id).catch(() => undefined);
+  const match = await prisma.match.findUnique({ where: { id: req.params.id }, include: { ...matchInclude, events: { orderBy: [{ minute: "asc" }] }, lineups: { include: { player: true } }, videos: true } });
   if (!match?.matchroom) return fail(res, 404, "No matchroom yet.");
   const viewer = res.locals.auth ? auth(res).user.id : null;
   const blocks = viewer
     ? await prisma.block.findMany({ where: { blockerId: viewer }, select: { blockedId: true } })
     : [];
   const hidden = new Set(blocks.map((row) => row.blockedId));
+  if (match.status === "SCHEDULED") await syncPrematch(match.id).catch(() => undefined);
   const [markets, messages, members] = await Promise.all([
-    prisma.market.findMany({ where: { matchId: match.id, disabled: false }, orderBy: { createdAt: "desc" }, take: 12 }),
+    prisma.market.findMany({
+      where: { matchId: match.id, disabled: false },
+      orderBy: { createdAt: "desc" },
+      take: 16,
+      include: { predictions: { where: { status: { in: ["CONFIRMED", "SUBMITTED"] } }, select: { side: true, userId: true, result: true } } },
+    }),
     prisma.chatMessage.findMany({
       where: { matchroomId: match.matchroom.id, deletedAt: null },
       orderBy: { createdAt: "desc" },
-      take: 60,
+      take: 80,
       include: { user: { select: userSelect } },
     }),
     prisma.matchroomMember.findMany({
@@ -405,16 +479,103 @@ router.get("/matches/:id/room", async (req, res) => {
       take: 20,
     }),
   ]);
+  const visible = messages.filter((message) => !hidden.has(message.userId)).reverse();
+  const parentIds = [...new Set(visible.map((row) => row.replyToId).filter((id): id is string => Boolean(id)))];
+  const parents = parentIds.length
+    ? await prisma.chatMessage.findMany({
+        where: { id: { in: parentIds } },
+        include: { user: { select: { displayName: true } } },
+      })
+    : [];
+  const parentById = new Map(parents.map((row) => [row.id, row]));
+  let squadIds = new Set<string>();
+  if (viewer) {
+    const membership = await prisma.squadMember.findFirst({ where: { userId: viewer }, select: { squadId: true } });
+    if (membership) {
+      const mates = await prisma.squadMember.findMany({ where: { squadId: membership.squadId }, select: { userId: true } });
+      squadIds = new Set(mates.map((row) => row.userId));
+    }
+  }
   res.json({
     match: matchJson(match, await presenceCount(match.matchroom.id)),
     disabled: match.matchroom.disabled,
-    events: match.events,
-    markets: markets.map(marketJson),
-    messages: messages.filter((message) => !hidden.has(message.userId)).reverse(),
+    events: match.events.map((event) => ({
+      ...event,
+      teamName:
+        event.teamProviderId === match.homeTeam.providerId
+          ? match.homeTeam.name
+          : event.teamProviderId === match.awayTeam.providerId
+            ? match.awayTeam.name
+            : null,
+    })),
+    markets: markets.map((row) =>
+      marketJson({
+        ...row,
+        yesCalls: row.predictions.filter((p) => p.side === "YES").length,
+        noCalls: row.predictions.filter((p) => p.side === "NO").length,
+        mySide: viewer ? (row.predictions.find((p) => p.userId === viewer && p.result === "PENDING")?.side ?? null) : null,
+        squadYes: row.predictions.filter((p) => squadIds.has(p.userId) && p.side === "YES").length,
+        squadNo: row.predictions.filter((p) => squadIds.has(p.userId) && p.side === "NO").length,
+      }),
+    ),
+    messages: visible.map((message) => {
+      const parent = message.replyToId ? parentById.get(message.replyToId) : null;
+      return {
+        ...message,
+        replyTo: parent ? { id: parent.id, body: parent.body, user: { displayName: parent.user.displayName } } : null,
+      };
+    }),
     members: members.map((member) => member.user),
     joined: viewer ? members.some((member) => member.user.id === viewer) || (await prisma.matchroomMember.findUnique({ where: { matchroomId_userId: { matchroomId: match.matchroom.id, userId: viewer } } })) != null : false,
     matchroomId: match.matchroom.id,
+    watch: match.matchroom.watchUrl ? parseWatchUrl(match.matchroom.watchUrl) : null,
+    broadcasts: match.broadcasts,
+    officialWatch: officialWatchFor(match.competition.name),
+    videos: [...match.videos]
+      .sort((a, b) => Number(b.featured) - Number(a.featured))
+      .map((row) => ({
+        id: row.id,
+        kind: row.kind,
+        title: row.title,
+        url: row.url,
+        provider: row.provider,
+        externalId: row.externalId,
+        embeddable: row.embeddable,
+        featured: row.featured,
+      })),
+    formations: { home: match.homeFormation, away: match.awayFormation },
+    lineups: {
+      home: match.lineups.filter((row) => row.teamId === match.homeTeamId).map(lineupJson),
+      away: match.lineups.filter((row) => row.teamId === match.awayTeamId).map(lineupJson),
+    },
   });
+});
+
+function lineupJson(row: { starter: boolean; position: string | null; jersey: number | null; grid: string | null; player: { id: string; name: string; imageUrl: string | null; providerId?: string } }) {
+  return {
+    id: row.player.id,
+    name: row.player.name,
+    imageUrl: row.player.imageUrl ?? playerHeadshotUrl(row.player.providerId),
+    starter: row.starter,
+    position: row.position,
+    jersey: row.jersey,
+    grid: row.grid,
+  };
+}
+
+router.post("/matchrooms/:id/watch", requireUser, async (req, res) => {
+  const body = parse(z.object({ url: z.string().url().max(500) }), req.body, res);
+  if (!body) return;
+  const parsed = parseWatchUrl(body.url);
+  if (!parsed) return fail(res, 400, "Use an official YouTube or Twitch link.");
+  const room = await prisma.matchroom.findUnique({ where: { id: req.params.id } });
+  if (!room || room.disabled) return fail(res, 404, "Matchroom is unavailable.");
+  const member = await prisma.matchroomMember.findUnique({
+    where: { matchroomId_userId: { matchroomId: room.id, userId: auth(res).user.id } },
+  });
+  if (!member) return fail(res, 403, "Join the terrace first.");
+  await prisma.matchroom.update({ where: { id: room.id }, data: { watchUrl: parsed.source } });
+  res.json({ watch: parsed });
 });
 
 router.post("/matchrooms/:id/join", requireUser, async (req, res) => {
@@ -649,6 +810,17 @@ router.get("/markets/:id", async (req, res) => {
   res.json({ market: marketJson(market) });
 });
 
+router.post("/markets/:id/call", requireUser, async (req, res) => {
+  const body = parse(z.object({ side: z.enum(["yes", "no"]) }), req.body, res);
+  if (!body) return;
+  try {
+    const prediction = await paperCall({ userId: auth(res).user.id, marketId: req.params.id, side: body.side });
+    res.json({ predictionId: prediction.id, side: prediction.side });
+  } catch (error) {
+    fail(res, 400, error instanceof Error ? error.message : "Could not take a side.");
+  }
+});
+
 router.post("/markets/:id/quote", requireUser, async (req, res) => {
   const body = parse(quoteBuySchema, req.body, res);
   if (!body) return;
@@ -694,27 +866,76 @@ router.post("/markets/:id/submit", requireUser, async (req, res) => {
 });
 
 router.get("/predictions", requireUser, async (req, res) => {
+  const user = auth(res).user;
   const rows = await prisma.prediction.findMany({
-    where: { userId: auth(res).user.id },
-    include: { market: true },
+    where: { userId: user.id },
+    include: { market: { include: { match: { include: { homeTeam: true, awayTeam: true, competition: true } } } } },
     orderBy: { createdAt: "desc" },
-    take: 50,
+    take: 80,
   });
+  const wallet = user.wallets[0]?.address;
+  const positions = wallet && panta.configured ? await panta.getPositions(wallet).catch(() => []) : [];
+  const byMarket = new Map(positions.map((row) => [`${row.marketId}:${row.side}`, row]));
   res.json({
-    predictions: rows.map((row) => ({
-      id: row.id,
-      side: row.side,
-      status: row.status,
-      result: row.result,
-      amountUsdc: row.amountUsdc.toString(),
-      shares: row.shares?.toString() ?? null,
-      avgPrice: row.avgPrice?.toString() ?? null,
-      xpAwarded: row.xpAwarded,
-      signature: row.signature,
-      createdAt: row.createdAt.toISOString(),
-      market: marketJson(row.market),
-    })),
+    predictions: rows.map((row) => {
+      const pos = row.market.pantaMarketId
+        ? byMarket.get(`${row.market.pantaMarketId}:${row.side.toLowerCase()}`)
+        : undefined;
+      const claimable = Boolean(pos?.claimable) && !row.claimedAt && row.result !== "INCORRECT";
+      return {
+        id: row.id,
+        side: row.side,
+        status: row.status,
+        result: row.result,
+        amountUsdc: row.amountUsdc.toString(),
+        shares: row.shares?.toString() ?? pos?.shares ?? null,
+        avgPrice: row.avgPrice?.toString() ?? null,
+        xpAwarded: row.xpAwarded,
+        signature: row.signature,
+        explorerUrl: row.signature ? explorerTxUrl(row.signature) : null,
+        claimExplorerUrl: row.claimSignature ? explorerTxUrl(row.claimSignature) : null,
+        claimedAt: row.claimedAt?.toISOString() ?? null,
+        claimable,
+        createdAt: row.createdAt.toISOString(),
+        match: {
+          id: row.market.matchId,
+          home: row.market.match.homeTeam.name,
+          away: row.market.match.awayTeam.name,
+          competition: row.market.match.competition.name,
+        },
+        market: marketJson(row.market),
+      };
+    }),
   });
+});
+
+router.post("/predictions/:id/claim/build", requireUser, async (req, res) => {
+  const wallet = auth(res).user.wallets[0]?.address;
+  if (!wallet) return fail(res, 400, "Connect a wallet to claim.");
+  try {
+    const built = await buildWinClaimForUser({ userId: auth(res).user.id, predictionId: req.params.id, wallet });
+    res.json(built);
+  } catch (error) {
+    fail(res, 400, error instanceof Error ? error.message : "Could not build the claim.");
+  }
+});
+
+router.post("/predictions/:id/claim/submit", requireUser, async (req, res) => {
+  const body = parse(z.object({ signature: z.string().min(32) }), req.body, res);
+  if (!body) return;
+  const wallet = auth(res).user.wallets[0]?.address;
+  if (!wallet) return fail(res, 400, "Connect a wallet to claim.");
+  try {
+    const done = await submitWinClaimForUser({
+      userId: auth(res).user.id,
+      predictionId: req.params.id,
+      signature: body.signature,
+      wallet,
+    });
+    res.json(done);
+  } catch (error) {
+    fail(res, 400, error instanceof Error ? error.message : "Could not record the claim.");
+  }
 });
 
 router.get("/leaderboards", async (req, res) => {
@@ -766,9 +987,21 @@ router.get("/rankings", async (req, res) => {
     take: 50,
     select: { ...userSelect, bestStreak: true },
   });
+  const settled = await prisma.prediction.findMany({
+    where: { userId: { in: users.map((row) => row.id) }, result: { in: ["CORRECT", "INCORRECT"] } },
+    orderBy: { createdAt: "desc" },
+    select: { userId: true, result: true },
+  });
+  const formByUser = new Map<string, string[]>();
+  for (const row of settled) {
+    const list = formByUser.get(row.userId) ?? [];
+    if (list.length >= 5) continue;
+    list.push(row.result === "CORRECT" ? "W" : "L");
+    formByUser.set(row.userId, list);
+  }
   const squads = await prisma.squad.findMany({ orderBy: { xp: "desc" }, take: 20 });
   res.json({
-    users: users.map((user, index) => ({ rank: index + 1, ...user })),
+    users: users.map((user, index) => ({ rank: index + 1, ...user, form: formByUser.get(user.id) ?? [] })),
     squads: squads.map((squad, index) => ({ rank: index + 1, id: squad.id, name: squad.name, xp: squad.xp })),
     season: req.query.season ?? null,
   });

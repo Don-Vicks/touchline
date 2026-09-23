@@ -17,6 +17,7 @@ import { logger } from "../logger";
 import { metric } from "../redis";
 import { publish } from "../realtime";
 import { PantaNotConfigured, panta } from "../integrations/panta";
+import { explorerTxUrl } from "../lib/explorer";
 import { postMessage } from "./chat";
 import { notify } from "./notify";
 import { settleMarket } from "./xp";
@@ -41,7 +42,11 @@ export async function ensureTemplates() {
 }
 
 function imageUrl() {
-  const url = config.pantaImageUrl;
+  const fromPinata =
+    config.pinataImageCid && config.pinataGateway
+      ? `${config.pinataGateway.replace(/\/$/, "")}/ipfs/${config.pinataImageCid}`
+      : null;
+  const url = fromPinata ?? config.pantaImageUrl;
   if (!url) return null;
   try {
     const parsed = new URL(url);
@@ -104,7 +109,7 @@ export async function persistCandidates(matchId: string, candidates: MarketCandi
           startMinute: candidate.startMinute,
           teamProviderId: candidate.teamId,
           playerName: candidate.playerName,
-          status: "PENDING",
+          status: panta.configured ? "PENDING" : "OPEN",
         },
       });
       created += 1;
@@ -222,7 +227,7 @@ export async function beginCreate(marketId: string, wallet: string) {
         wallet,
         question: market.question,
         resolutionRule: market.resolutionRule,
-        sourcesOfTruth: ["https://www.sportmonks.com"],
+        sourcesOfTruth: ["https://www.espn.com/soccer/", "https://www.football-data.org/"],
         startTime: Math.floor(market.startTime.getTime() / 1000),
         endTime: Math.floor(market.endTime.getTime() / 1000),
         resolutionTime: Math.floor(market.resolutionTime.getTime() / 1000),
@@ -279,10 +284,10 @@ export async function attachPanta(marketId: string) {
   if (!panta.configured || !image) {
     await prisma.market.update({
       where: { id: marketId },
-      data: { failureReason: "Markets temporarily unavailable.", status: "PENDING" },
+      data: { status: "OPEN", failureReason: null },
     });
     await prisma.marketGenerationLog.create({
-      data: { marketId, matchId: market.matchId, level: "waiting", message: "Panta adapter is not configured." },
+      data: { marketId, matchId: market.matchId, level: "waiting", message: "XP-only until PANTA_API_KEY is set." },
     });
     return;
   }
@@ -316,6 +321,27 @@ export async function attachPanta(marketId: string) {
     });
     await metric("markets_failed");
   }
+}
+
+export async function paperCall(input: { userId: string; marketId: string; side: "yes" | "no" }) {
+  if (panta.configured) throw new Error("This call settles in USDC. Use the wallet flow.");
+  const market = await prisma.market.findUnique({ where: { id: input.marketId } });
+  if (!market || market.disabled || market.outcome) throw new Error("That call is closed.");
+  if (market.endTime.getTime() < Date.now()) throw new Error("That window has closed.");
+  const existing = await prisma.prediction.findFirst({
+    where: { userId: input.userId, marketId: input.marketId, result: "PENDING" },
+  });
+  if (existing) throw new Error("You already took a side.");
+  return prisma.prediction.create({
+    data: {
+      userId: input.userId,
+      marketId: input.marketId,
+      side: input.side === "yes" ? "YES" : "NO",
+      amountUsdc: 0,
+      status: "CONFIRMED",
+      isLive: market.marketType === "breaking",
+    },
+  });
 }
 
 export async function syncPantaMarkets() {
@@ -474,6 +500,7 @@ export async function submitForUser(input: { userId: string; orderId: string; si
     where: { id: prediction.id },
     data: { status: "SUBMITTED", signature: input.signature },
   });
+  const explorerUrl = explorerTxUrl(input.signature);
   const roomId = prediction.market.match.matchroom?.id;
   const side = prediction.side === "YES" ? "YES" : "NO";
   if (roomId) {
@@ -483,14 +510,45 @@ export async function submitForUser(input: { userId: string; orderId: string; si
       matchroomId: roomId,
       kind: "receipt",
       body: `${prediction.user.displayName} — ${side} · ${prediction.market.question}`,
-      meta: { predictionId: prediction.id, side, signature: input.signature },
+      meta: { predictionId: prediction.id, side, signature: input.signature, explorerUrl },
     }).catch(() => undefined);
     await publish(`matchroom:${roomId}`, "prediction:new", {
       id: prediction.id,
       user: prediction.user.displayName,
       side,
       question: prediction.market.question,
+      explorerUrl,
     });
   }
-  return submitted;
+  return { ...submitted, signature: input.signature, explorerUrl };
+}
+
+export async function buildWinClaimForUser(input: { userId: string; predictionId: string; wallet: string }) {
+  const prediction = await prisma.prediction.findFirst({
+    where: { id: input.predictionId, userId: input.userId },
+    include: { market: true },
+  });
+  if (!prediction?.market.pantaMarketId) throw new PantaNotConfigured();
+  if (prediction.claimedAt) throw new Error("Already claimed.");
+  if (!panta.configured) throw new PantaNotConfigured();
+  return panta.buildWinClaim({ wallet: input.wallet, marketId: prediction.market.pantaMarketId });
+}
+
+export async function submitWinClaimForUser(input: { userId: string; predictionId: string; signature: string; wallet: string }) {
+  const prediction = await prisma.prediction.findFirst({
+    where: { id: input.predictionId, userId: input.userId },
+    include: { market: true },
+  });
+  if (!prediction?.market.pantaMarketId) throw new PantaNotConfigured();
+  if (prediction.claimedAt) throw new Error("Already claimed.");
+  await panta.reportClaim({
+    signature: input.signature,
+    wallet: input.wallet,
+    marketId: prediction.market.pantaMarketId,
+  }).catch(() => undefined);
+  await prisma.prediction.update({
+    where: { id: prediction.id },
+    data: { claimedAt: new Date(), claimSignature: input.signature },
+  });
+  return { explorerUrl: explorerTxUrl(input.signature), signature: input.signature };
 }
