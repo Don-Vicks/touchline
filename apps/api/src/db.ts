@@ -1,20 +1,17 @@
 import { PrismaClient } from "@prisma/client";
-import { PrismaNeon } from "@prisma/adapter-neon";
-import { neonConfig } from "@neondatabase/serverless";
-
-if (typeof WebSocket !== "undefined" && !neonConfig.webSocketConstructor) {
-  neonConfig.webSocketConstructor = WebSocket;
-}
+import { PrismaNeonHttp } from "@prisma/adapter-neon";
 
 let prismaClientInstance: PrismaClient | null = null;
 let currentConnStr: string | null = null;
 
 export function getPrisma(databaseUrl?: string): PrismaClient {
-  const connStr =
+  const connStr = (
     databaseUrl ||
     (globalThis as any).__DATABASE_URL__ ||
     process.env.DATABASE_URL_POOLED ||
-    process.env.DATABASE_URL;
+    process.env.DATABASE_URL ||
+    ""
+  ).trim();
 
   if (!connStr) {
     if (!prismaClientInstance) {
@@ -27,7 +24,7 @@ export function getPrisma(databaseUrl?: string): PrismaClient {
 
   if (!prismaClientInstance || currentConnStr !== connStr) {
     currentConnStr = connStr;
-    const adapter = new PrismaNeon({ connectionString: connStr });
+    const adapter = new PrismaNeonHttp(connStr);
     prismaClientInstance = new PrismaClient({
       adapter,
       log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
