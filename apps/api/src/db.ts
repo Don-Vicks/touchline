@@ -13,22 +13,20 @@ export function getPrisma(databaseUrl?: string): PrismaClient {
     ""
   ).trim();
 
-  if (!connStr) {
-    if (!prismaClientInstance) {
+  if (!prismaClientInstance || currentConnStr !== connStr) {
+    currentConnStr = connStr;
+    const isNeon = connStr.includes("neon.tech");
+    if (isNeon) {
+      const adapter = new PrismaNeonHttp(connStr);
+      prismaClientInstance = new PrismaClient({
+        adapter,
+        log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
+      });
+    } else {
       prismaClientInstance = new PrismaClient({
         log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
       });
     }
-    return prismaClientInstance;
-  }
-
-  if (!prismaClientInstance || currentConnStr !== connStr) {
-    currentConnStr = connStr;
-    const adapter = new PrismaNeonHttp(connStr);
-    prismaClientInstance = new PrismaClient({
-      adapter,
-      log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
-    });
   }
 
   return prismaClientInstance;
