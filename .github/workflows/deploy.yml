@@ -63,6 +63,9 @@ jobs:
             npx wrangler deploy
           else
             npx wrangler deploy --name "${{ steps.env.outputs.api_name }}"
+            if [ -n "${{ secrets.DATABASE_URL_POOLED }}" ]; then
+              echo "${{ secrets.DATABASE_URL_POOLED }}" | npx wrangler secret put DATABASE_URL_POOLED --name "${{ steps.env.outputs.api_name }}" || true
+            fi
           fi
 
       - name: Build Web with OpenNext
