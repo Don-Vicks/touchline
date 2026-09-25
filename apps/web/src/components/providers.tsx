@@ -14,7 +14,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(
     () =>
       new QueryClient({
-        defaultOptions: { queries: { refetchOnWindowFocus: false, retry: 1, staleTime: 4_000 } },
+        defaultOptions: { queries: { refetchOnWindowFocus: false, retry: 1, staleTime: 20_000 } },
       }),
   );
   const wallets = useMemo(() => [new PhantomWalletAdapter(), new SolflareWalletAdapter()], []);

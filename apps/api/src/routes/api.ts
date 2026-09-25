@@ -55,6 +55,26 @@ import { logger } from "../logger";
 const router = Router();
 const MONTH = 30 * 24 * 60 * 60 * 1000;
 
+const responseCache = new Map<string, { body: any; expiresAt: number }>();
+
+function getCached<T>(key: string): T | null {
+  const hit = responseCache.get(key);
+  if (hit && Date.now() < hit.expiresAt) {
+    return hit.body as T;
+  }
+  return null;
+}
+
+function setCached(key: string, body: any, ttlSeconds = 15) {
+  if (responseCache.size > 200) {
+    const now = Date.now();
+    for (const [k, v] of responseCache) {
+      if (now >= v.expiresAt) responseCache.delete(k);
+    }
+  }
+  responseCache.set(key, { body, expiresAt: Date.now() + ttlSeconds * 1000 });
+}
+
 function fail(res: Response, status: number, error: string) {
   res.status(status).json({ error });
 }
@@ -273,74 +293,88 @@ router.get("/users/:id", async (req, res) => {
 });
 
 router.get("/home", async (_req, res) => {
+  res.setHeader("Cache-Control", "public, max-age=5, s-maxage=15, stale-while-revalidate=30");
   const user = res.locals.auth ? auth(res).user : null;
-  const [live, recent, soon, trending, leaders, health] = await Promise.all([
-    prisma.match.findMany({
-      where: { status: { in: ["LIVE", "HALFTIME"] } },
-      include: matchInclude,
-      orderBy: { kickoffAt: "desc" },
-      take: 20,
-    }),
-    prisma.match.findMany({
-      where: { status: "FINISHED", kickoffAt: { gte: new Date(Date.now() - 14 * 24 * 60 * 60_000) } },
-      include: matchInclude,
-      orderBy: { kickoffAt: "desc" },
-      take: 6,
-    }),
-    prisma.match.findMany({
-      where: { status: "SCHEDULED", kickoffAt: { gte: new Date(), lte: new Date(Date.now() + 21 * 24 * 60 * 60_000) } },
-      include: matchInclude,
-      orderBy: { kickoffAt: "asc" },
-      take: 24,
-    }),
-    prisma.market.findMany({
-      where: { status: { in: ["OPEN", "TRADING", "PENDING"] }, disabled: false },
-      orderBy: { updatedAt: "desc" },
-      take: 5,
-      include: { predictions: { where: { status: { in: ["CONFIRMED", "SUBMITTED"] } }, select: { side: true } } },
-    }),
-    prisma.user.findMany({ where: { bannedAt: null }, orderBy: [{ xp: "desc" }, { id: "asc" }], take: 8, select: userSelect }),
-    prisma.providerHealth.findMany(),
-  ]);
-  const squad = user
-    ? await prisma.squadMember.findFirst({
-        where: { userId: user.id },
-        include: { squad: true },
-        orderBy: { joinedAt: "asc" },
-      })
-    : null;
-  let squadRank: number | null = null;
-  if (squad) {
-    squadRank = (await prisma.squad.count({ where: { xp: { gt: squad.squad.xp } } })) + 1;
+
+  let publicData = getCached<any>("home:public");
+  if (!publicData) {
+    const [live, recent, soon, trending, leaders, health] = await Promise.all([
+      prisma.match.findMany({
+        where: { status: { in: ["LIVE", "HALFTIME"] } },
+        include: matchInclude,
+        orderBy: { kickoffAt: "desc" },
+        take: 10,
+      }),
+      prisma.match.findMany({
+        where: { status: "FINISHED", kickoffAt: { gte: new Date(Date.now() - 14 * 24 * 60 * 60_000) } },
+        include: matchInclude,
+        orderBy: { kickoffAt: "desc" },
+        take: 6,
+      }),
+      prisma.match.findMany({
+        where: { status: "SCHEDULED", kickoffAt: { gte: new Date(), lte: new Date(Date.now() + 21 * 24 * 60 * 60_000) } },
+        include: matchInclude,
+        orderBy: { kickoffAt: "asc" },
+        take: 16,
+      }),
+      prisma.market.findMany({
+        where: { status: { in: ["OPEN", "TRADING", "PENDING"] }, disabled: false },
+        orderBy: { updatedAt: "desc" },
+        take: 5,
+        include: { predictions: { where: { status: { in: ["CONFIRMED", "SUBMITTED"] } }, select: { side: true } } },
+      }),
+      prisma.user.findMany({ where: { bannedAt: null }, orderBy: [{ xp: "desc" }, { id: "asc" }], take: 8, select: userSelect }),
+      prisma.providerHealth.findMany(),
+    ]);
+
+    const withWatching = async (rows: typeof live) =>
+      Promise.all(rows.map(async (row) => matchJson(row, row.matchroom ? await presenceCount(row.matchroom.id) : 0)));
+    const playable = (rows: typeof live) => rows.filter((row) => isFeaturedCompetition(row.competition.name));
+    const byKickoff = (rows: typeof live) =>
+      [...rows].sort((a, b) => new Date(a.kickoffAt).getTime() - new Date(b.kickoffAt).getTime() || competitionWeight(a.competition.name) - competitionWeight(b.competition.name));
+
+    publicData = {
+      live: await withWatching(byKickoff(playable(live)).slice(0, 6)),
+      recent: await withWatching(playable(recent)),
+      soon: await withWatching(byKickoff(playable(soon)).slice(0, 8)),
+      trending: trending.map((row) =>
+        marketJson({
+          ...row,
+          yesCalls: row.predictions.filter((p) => p.side === "YES").length,
+          noCalls: row.predictions.filter((p) => p.side === "NO").length,
+        }),
+      ),
+      leaders: leaders.map((row, index) => ({ ...row, rank: index + 1 })),
+      provider: {
+        football: health.some((row) => row.id !== "panta" && row.status === "up")
+          ? "up"
+          : health.some((row) => row.id !== "panta")
+            ? "down"
+            : "unconfigured",
+        panta: health.find((row) => row.id === "panta")?.status ?? "unconfigured",
+        feeds: health.filter((row) => row.id !== "panta").map((row) => ({ id: row.id, status: row.status, detail: row.detail })),
+      },
+    };
+    setCached("home:public", publicData, 15);
   }
-  const withWatching = async (rows: typeof live) =>
-    Promise.all(rows.map(async (row) => matchJson(row, row.matchroom ? await presenceCount(row.matchroom.id) : 0)));
-  const playable = (rows: typeof live) => rows.filter((row) => isFeaturedCompetition(row.competition.name));
-  const byKickoff = (rows: typeof live) =>
-    [...rows].sort((a, b) => new Date(a.kickoffAt).getTime() - new Date(b.kickoffAt).getTime() || competitionWeight(a.competition.name) - competitionWeight(b.competition.name));
+
+  let squad = null;
+  let squadRank: number | null = null;
+  if (user) {
+    squad = await prisma.squadMember.findFirst({
+      where: { userId: user.id },
+      include: { squad: true },
+      orderBy: { joinedAt: "asc" },
+    });
+    if (squad) {
+      squadRank = (await prisma.squad.count({ where: { xp: { gt: squad.squad.xp } } })) + 1;
+    }
+  }
+
   res.json({
     user: user ? { displayName: user.displayName, username: user.username, xp: user.xp, rank: await rankOfUser(user.id, user.xp) } : null,
-    live: await withWatching(byKickoff(playable(live)).slice(0, 6)),
-    recent: await withWatching(playable(recent)),
-    soon: await withWatching(byKickoff(playable(soon)).slice(0, 8)),
     squad: squad ? { id: squad.squad.id, name: squad.squad.name, xp: squad.squad.xp, rank: squadRank, members: await prisma.squadMember.count({ where: { squadId: squad.squad.id } }) } : null,
-    trending: trending.map((row) =>
-      marketJson({
-        ...row,
-        yesCalls: row.predictions.filter((p) => p.side === "YES").length,
-        noCalls: row.predictions.filter((p) => p.side === "NO").length,
-      }),
-    ),
-    leaders: leaders.map((row, index) => ({ ...row, rank: index + 1 })),
-    provider: {
-      football: health.some((row) => row.id !== "panta" && row.status === "up")
-        ? "up"
-        : health.some((row) => row.id !== "panta")
-          ? "down"
-          : "unconfigured",
-      panta: health.find((row) => row.id === "panta")?.status ?? "unconfigured",
-      feeds: health.filter((row) => row.id !== "panta").map((row) => ({ id: row.id, status: row.status, detail: row.detail })),
-    },
+    ...publicData,
   });
 });
 
@@ -373,13 +407,24 @@ router.get("/players", async (req, res) => {
 });
 
 router.get("/matches", async (req, res) => {
+  const when = String(req.query.when ?? "");
+  const leagueSlug = typeof req.query.league === "string" ? req.query.league : "";
   const tz = Number(req.query.tz ?? 0);
+  const competitionId = typeof req.query.competitionId === "string" ? req.query.competitionId : "";
+  const teamId = typeof req.query.teamId === "string" ? req.query.teamId : "";
+
+  const cacheKey = `matches:${when}:${leagueSlug}:${competitionId}:${teamId}:${tz}`;
+  const cached = getCached<any>(cacheKey);
+  if (cached) {
+    res.setHeader("Cache-Control", "public, max-age=5, s-maxage=15, stale-while-revalidate=60");
+    return res.json(cached);
+  }
+
   const shift = Number.isFinite(tz) ? tz * 60_000 : 0;
   const localNow = new Date(Date.now() + shift);
   const start = new Date(Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), localNow.getUTCDate()) - shift);
   const day = 24 * 60 * 60_000;
   const where: Prisma.MatchWhereInput = {};
-  const when = String(req.query.when ?? "");
   if (when === "live") where.status = { in: ["LIVE", "HALFTIME"] };
   if (when === "soon" || when === "upcoming") {
     where.status = "SCHEDULED";
@@ -391,11 +436,10 @@ router.get("/matches", async (req, res) => {
   }
   if (when === "today") where.kickoffAt = { gte: start, lt: new Date(start.getTime() + day) };
   if (when === "tomorrow") where.kickoffAt = { gte: new Date(start.getTime() + day), lt: new Date(start.getTime() + 2 * day) };
-  if (typeof req.query.competitionId === "string") where.competitionId = req.query.competitionId;
-  const leagueSlug = typeof req.query.league === "string" ? req.query.league : "";
+  if (competitionId) where.competitionId = competitionId;
   const featured = FEATURED_COMPETITIONS.find((row) => row.id === leagueSlug);
-  if (typeof req.query.teamId === "string") where.OR = [{ homeTeamId: req.query.teamId }, { awayTeamId: req.query.teamId }];
-  const matches = await prisma.match.findMany({ where, include: matchInclude, orderBy: [{ status: "asc" }, { kickoffAt: "asc" }], take: 160 });
+  if (teamId) where.OR = [{ homeTeamId: teamId }, { awayTeamId: teamId }];
+  const matches = await prisma.match.findMany({ where, include: matchInclude, orderBy: [{ status: "asc" }, { kickoffAt: "asc" }], take: 60 });
   const scoped = matches.filter((row) => {
     if (!isFeaturedCompetition(row.competition.name)) return false;
     if (featured && !featured.match.test(row.competition.name)) return false;
@@ -409,9 +453,12 @@ router.get("/matches", async (req, res) => {
       competitionWeight(a.competition.name) - competitionWeight(b.competition.name)
     );
   });
-  res.json({
-    matches: await Promise.all(ranked.slice(0, 80).map(async (row) => matchJson(row, row.matchroom ? await presenceCount(row.matchroom.id) : 0))),
-  });
+  const payload = {
+    matches: await Promise.all(ranked.slice(0, 50).map(async (row) => matchJson(row, row.matchroom ? await presenceCount(row.matchroom.id) : 0))),
+  };
+  setCached(cacheKey, payload, 15);
+  res.setHeader("Cache-Control", "public, max-age=5, s-maxage=15, stale-while-revalidate=60");
+  res.json(payload);
 });
 
 router.get("/matches/:id", async (req, res) => {
@@ -981,6 +1028,13 @@ router.get("/leaderboards", async (req, res) => {
 });
 
 router.get("/rankings", async (req, res) => {
+  const cacheKey = `rankings:${req.query.season ?? "all"}`;
+  const cached = getCached<any>(cacheKey);
+  if (cached) {
+    res.setHeader("Cache-Control", "public, max-age=10, s-maxage=30, stale-while-revalidate=60");
+    return res.json(cached);
+  }
+
   const users = await prisma.user.findMany({
     where: { bannedAt: null },
     orderBy: [{ xp: "desc" }, { id: "asc" }],
@@ -1000,11 +1054,14 @@ router.get("/rankings", async (req, res) => {
     formByUser.set(row.userId, list);
   }
   const squads = await prisma.squad.findMany({ orderBy: { xp: "desc" }, take: 20 });
-  res.json({
+  const payload = {
     users: users.map((user, index) => ({ rank: index + 1, ...user, form: formByUser.get(user.id) ?? [] })),
     squads: squads.map((squad, index) => ({ rank: index + 1, id: squad.id, name: squad.name, xp: squad.xp })),
     season: req.query.season ?? null,
-  });
+  };
+  setCached(cacheKey, payload, 30);
+  res.setHeader("Cache-Control", "public, max-age=10, s-maxage=30, stale-while-revalidate=60");
+  res.json(payload);
 });
 
 router.get("/notifications", requireUser, async (_req, res) => {
