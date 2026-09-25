@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "touchline-api",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-08-03",
+  "compatibility_flags": ["nodejs_compat"],
+  "alias": {
+    "iconv-lite": "./src/shims/iconv-lite.js"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "touchline-db",
+      "database_id": "da655637-bf58-44fd-a001-727ccefe54f3"
+    }
+  ],
+  "vars": {
+    "NODE_ENV": "production",
+    "SOLANA_NETWORK": "mainnet-beta",
+    "SOLANA_RPC_URL": "https://api.mainnet-beta.solana.com",
+    "PANTA_API_URL": "https://live-api.panta.market/api/v1",
+    "SPORTMONKS_BASE_URL": "https://api.sportmonks.com/v3/football",
+    "LOG_LEVEL": "info"
+  }
+}

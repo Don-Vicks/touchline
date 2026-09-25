@@ -2,8 +2,14 @@ import dotenv from "dotenv";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-dotenv.config({ path: path.join(root, ".env") });
+try {
+  if (typeof import.meta?.url === "string" && import.meta.url.startsWith("file:")) {
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+    dotenv.config({ path: path.join(root, ".env") });
+  }
+} catch {
+  // Ignored in serverless/worker runtime
+}
 
 function optional(name: string): string | undefined {
   const value = process.env[name]?.trim();
@@ -31,6 +37,8 @@ export const config = {
   thesportsdbKey: optional("THESPORTSDB_API_KEY") ?? "3",
   footballDataToken: optional("FOOTBALL_DATA_TOKEN"),
   youtubeApiKey: optional("YOUTUBE_API_KEY"),
+  /** Search.list costs 100 quota units. Default off — RSS/playlists cost nothing. */
+  youtubeUseSearch: process.env.YOUTUBE_USE_SEARCH === "true",
   apiFootballKey: optional("API_FOOTBALL_KEY"),
   footballPollMs: Number(process.env.FOOTBALL_POLL_MS ?? 20_000),
   fixturePollMs: Number(process.env.FIXTURE_POLL_MS ?? 120_000),

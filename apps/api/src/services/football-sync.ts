@@ -143,7 +143,7 @@ export async function ingest(fixture: DomainFixture, opts: { generate: boolean }
       lengthMin: fixture.lengthMin,
       providerState: fixture.providerState,
       lastSyncedAt: new Date(),
-      broadcasts: (fixture.broadcasts ?? []).map((row) => row.name),
+      broadcasts: JSON.stringify((fixture.broadcasts ?? []).map((row) => row.name)),
       homeFormation: fixture.homeFormation ?? undefined,
       awayFormation: fixture.awayFormation ?? undefined,
     },
@@ -165,7 +165,7 @@ export async function ingest(fixture: DomainFixture, opts: { generate: boolean }
       providerState: fixture.providerState,
       lastSyncedAt: new Date(),
       seasonId: seasonId ?? undefined,
-      broadcasts: fixture.broadcasts?.length ? fixture.broadcasts.map((row) => row.name) : undefined,
+      broadcasts: fixture.broadcasts?.length ? JSON.stringify(fixture.broadcasts.map((row) => row.name)) : undefined,
       homeFormation: fixture.homeFormation ?? undefined,
       awayFormation: fixture.awayFormation ?? undefined,
     },
@@ -439,7 +439,7 @@ export async function enrichMatchDetail(matchId: string) {
   if (loaded?.status === "FINISHED" && yt === 0) {
     const rss = await fetchOfficialChannelHighlights(loaded.homeTeam.name, loaded.awayTeam.name, loaded.competition.name);
     let clips = rss;
-    if (!rss.length && !loaded.highlightSearchedAt && !(await youtubeQuotaBlocked())) {
+    if (!rss.length && !loaded.highlightSearchedAt && config.youtubeUseSearch && !(await youtubeQuotaBlocked())) {
       clips = await searchYoutubeVideos(`${loaded.homeTeam.name} vs ${loaded.awayTeam.name} ${loaded.competition.name} highlights`);
       if (!(await youtubeQuotaBlocked())) {
         await prisma.match.update({ where: { id: matchId }, data: { highlightSearchedAt: new Date() } });

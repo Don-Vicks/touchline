@@ -20,6 +20,13 @@
     "test": "pnpm --filter @touchline/market-engine test",
     "db:generate": "pnpm --filter @touchline/api db:generate",
     "db:migrate": "pnpm --filter @touchline/api db:migrate",
+    "d1:migrate": "npx wrangler d1 execute touchline-db --remote --file=apps/api/prisma/migrations_d1.sql",
+    "deploy:api": "pnpm --filter @touchline/api exec wrangler deploy",
+    "deploy:web": "cd apps/web && npx @opennextjs/cloudflare build && pnpm exec wrangler deploy",
+    "deploy": "pnpm deploy:api && pnpm deploy:web",
     "build": "pnpm -r --filter @touchline/web --filter @touchline/api build"
+  },
+  "devDependencies": {
+    "wrangler": "^4.140.0"
   }
 }

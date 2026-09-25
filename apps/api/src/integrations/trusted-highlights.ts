@@ -62,10 +62,17 @@ function videosFromXml(xml: string, home: string, away: string): DomainVideo[] {
   return out;
 }
 
+function uploadsPlaylist(channelId: string) {
+  return channelId.startsWith("UC") ? `UU${channelId.slice(2)}` : channelId;
+}
+
 export async function fetchOfficialChannelHighlights(home: string, away: string, competition: string): Promise<DomainVideo[]> {
   const ids = CHANNELS.find((row) => row.match.test(competition))?.ids ?? [];
+  const extra = ["UCG5qGWdu8nIRZqJ_GgDwQ-w"];
+  const all = [...new Set([...ids, ...extra])];
   const feeds = [
-    ...ids.map((id) => readXml(`https://www.youtube.com/feeds/videos.xml?channel_id=${id}`)),
+    ...all.map((id) => readXml(`https://www.youtube.com/feeds/videos.xml?channel_id=${id}`)),
+    ...all.map((id) => readXml(`https://www.youtube.com/feeds/videos.xml?playlist_id=${uploadsPlaylist(id)}`)),
     readXml("https://www.youtube.com/feeds/videos.xml?user=SuperSport"),
     readXml("https://www.youtube.com/feeds/videos.xml?user=SkySports"),
   ];

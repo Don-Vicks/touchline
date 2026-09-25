@@ -1,0 +1,102 @@
+name: Deploy to Cloudflare Workers
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Generate Prisma Client
+        run: pnpm --filter @touchline/api exec prisma generate
+
+      - name: Determine Environment & Branch
+        id: env
+        run: |
+          RAW_BRANCH="${{ github.head_ref || github.ref_name }}"
+          # Sanitize branch name to lowercase alphanumeric + hyphens (max 28 chars)
+          CLEAN_BRANCH=$(echo "$RAW_BRANCH" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9]/-/g' -e 's/^-//' -e 's/-$//' | cut -c1-28)
+          echo "branch=$CLEAN_BRANCH" >> $GITHUB_OUTPUT
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "is_prod=true" >> $GITHUB_OUTPUT
+            echo "api_name=touchline-api" >> $GITHUB_OUTPUT
+            echo "web_name=touchline-web" >> $GITHUB_OUTPUT
+          else
+            echo "is_prod=false" >> $GITHUB_OUTPUT
+            echo "api_name=touchline-api-${CLEAN_BRANCH}" >> $GITHUB_OUTPUT
+            echo "web_name=touchline-web-${CLEAN_BRANCH}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy API Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || '936a0ed4e770b52eb2404166d94ae018' }}
+        run: |
+          cd apps/api
+          if [ "${{ steps.env.outputs.is_prod }}" = "true" ]; then
+            npx wrangler deploy
+          else
+            npx wrangler deploy --name "${{ steps.env.outputs.api_name }}"
+          fi
+
+      - name: Build Web with OpenNext
+        env:
+          NEXT_PUBLIC_API_URL: https://${{ steps.env.outputs.api_name }}.accrue-escrow.workers.dev
+        run: |
+          cd apps/web
+          npx @opennextjs/cloudflare build
+
+      - name: Deploy Web Worker
+        id: deploy_web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || '936a0ed4e770b52eb2404166d94ae018' }}
+        run: |
+          cd apps/web
+          if [ "${{ steps.env.outputs.is_prod }}" = "true" ]; then
+            npx wrangler deploy
+          else
+            npx wrangler deploy --name "${{ steps.env.outputs.web_name }}"
+          fi
+
+      - name: Add Deployment Summary
+        run: |
+          API_URL="https://${{ steps.env.outputs.api_name }}.accrue-escrow.workers.dev"
+          WEB_URL="https://${{ steps.env.outputs.web_name }}.accrue-escrow.workers.dev"
+          echo "### 🚀 Cloudflare Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.env.outputs.is_prod }}" = "true" ]; then
+            echo "**Environment:** Production (main)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Environment:** Branch Preview (${{ steps.env.outputs.branch }})" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "- **Web App:** $WEB_URL" >> $GITHUB_STEP_SUMMARY
+          echo "- **API Worker:** $API_URL" >> $GITHUB_STEP_SUMMARY
+          echo "- **D1 Database:** \`touchline-db\`" >> $GITHUB_STEP_SUMMARY

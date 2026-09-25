@@ -355,7 +355,7 @@ router.get("/competitions", async (_req, res) => {
 router.get("/teams", async (req, res) => {
   const q = String(req.query.q ?? "").trim();
   const teams = await prisma.team.findMany({
-    where: q ? { name: { contains: q, mode: "insensitive" } } : undefined,
+    where: q ? { name: { contains: q } } : undefined,
     orderBy: { name: "asc" },
     take: 40,
   });
