@@ -10,7 +10,9 @@
     "db:migrate": "node --env-file=../../.env ./node_modules/prisma/build/index.js migrate dev"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
     "@prisma/adapter-d1": "^6.19.3",
+    "@prisma/adapter-neon": "^7.10.0",
     "@prisma/client": "^6.16.2",
     "@socket.io/redis-adapter": "^8.3.0",
     "@solana/web3.js": "^1.98.4",

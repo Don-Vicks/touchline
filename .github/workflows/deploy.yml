@@ -23,8 +23,6 @@ jobs:
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -99,4 +97,4 @@ jobs:
           fi
           echo "- **Web App:** $WEB_URL" >> $GITHUB_STEP_SUMMARY
           echo "- **API Worker:** $API_URL" >> $GITHUB_STEP_SUMMARY
-          echo "- **D1 Database:** \`touchline-db\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Database:** Neon PostgreSQL" >> $GITHUB_STEP_SUMMARY

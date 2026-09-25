@@ -1,7 +1,7 @@
 import { Redis } from "ioredis";
 import { config } from "./config.js";
 
-export const redis = new Redis(config.redisUrl, {
+const rawRedis = new Redis(config.redisUrl, {
   maxRetriesPerRequest: 1,
   enableOfflineQueue: false,
   lazyConnect: true,
@@ -10,7 +10,36 @@ export const redis = new Redis(config.redisUrl, {
     return null;
   },
 });
-redis.on("error", () => {});
+rawRedis.on("error", () => {});
+
+export const redis: Redis = new Proxy(rawRedis as any, {
+  get(target, prop, receiver) {
+    const val = Reflect.get(target, prop, receiver);
+    if (typeof val === "function") {
+      return async function (...args: any[]) {
+        try {
+          return await val.apply(target, args);
+        } catch {
+          const p = String(prop);
+          if (p === "scard" || p === "incr" || p === "incrby" || p === "del") return 0;
+          if (p === "keys" || p === "mget") return [];
+          if (p === "hgetall") return {};
+          if (p === "duplicate") {
+            try {
+              const dup = target.duplicate();
+              dup.on("error", () => {});
+              return dup;
+            } catch {
+              return { on: () => {}, subscribe: () => {} };
+            }
+          }
+          return null;
+        }
+      };
+    }
+    return val;
+  },
+});
 
 export function bullConnection() {
   return new Redis(config.redisUrl, { maxRetriesPerRequest: null });

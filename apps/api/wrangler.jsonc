@@ -7,15 +7,10 @@
   "alias": {
     "iconv-lite": "./src/shims/iconv-lite.js"
   },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "touchline-db",
-      "database_id": "da655637-bf58-44fd-a001-727ccefe54f3"
-    }
-  ],
   "vars": {
     "NODE_ENV": "production",
+    "DATABASE_URL": "postgresql://neondb_owner:npg_IFQ7qNWYHx3y@ep-old-star-b41kyybi.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require",
+    "DATABASE_URL_POOLED": "postgresql://neondb_owner:npg_IFQ7qNWYHx3y@ep-old-star-b41kyybi-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require",
     "SOLANA_NETWORK": "mainnet-beta",
     "SOLANA_RPC_URL": "https://api.mainnet-beta.solana.com",
     "PANTA_API_URL": "https://live-api.panta.market/api/v1",

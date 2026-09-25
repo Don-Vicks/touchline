@@ -317,7 +317,7 @@ router.get("/home", async (_req, res) => {
     Promise.all(rows.map(async (row) => matchJson(row, row.matchroom ? await presenceCount(row.matchroom.id) : 0)));
   const playable = (rows: typeof live) => rows.filter((row) => isFeaturedCompetition(row.competition.name));
   const byKickoff = (rows: typeof live) =>
-    [...rows].sort((a, b) => a.kickoffAt.getTime() - b.kickoffAt.getTime() || competitionWeight(a.competition.name) - competitionWeight(b.competition.name));
+    [...rows].sort((a, b) => new Date(a.kickoffAt).getTime() - new Date(b.kickoffAt).getTime() || competitionWeight(a.competition.name) - competitionWeight(b.competition.name));
   res.json({
     user: user ? { displayName: user.displayName, username: user.username, xp: user.xp, rank: await rankOfUser(user.id, user.xp) } : null,
     live: await withWatching(byKickoff(playable(live)).slice(0, 6)),

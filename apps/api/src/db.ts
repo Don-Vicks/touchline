@@ -1,26 +1,40 @@
 import { PrismaClient } from "@prisma/client";
-import { PrismaD1 } from "@prisma/adapter-d1";
+import { PrismaNeon } from "@prisma/adapter-neon";
+import { neonConfig } from "@neondatabase/serverless";
 
-let clientInstance: PrismaClient | null = null;
-let d1ClientInstance: PrismaClient | null = null;
-let lastD1Ref: any = null;
+if (typeof WebSocket !== "undefined" && !neonConfig.webSocketConstructor) {
+  neonConfig.webSocketConstructor = WebSocket;
+}
 
-export function getPrisma(d1?: any): PrismaClient {
-  const activeD1 = d1 ?? (globalThis as any).__D1_DATABASE__;
-  if (activeD1) {
-    if (!d1ClientInstance || lastD1Ref !== activeD1) {
-      lastD1Ref = activeD1;
-      const adapter = new PrismaD1(activeD1);
-      d1ClientInstance = new PrismaClient({ adapter });
+let prismaClientInstance: PrismaClient | null = null;
+let currentConnStr: string | null = null;
+
+export function getPrisma(databaseUrl?: string): PrismaClient {
+  const connStr =
+    databaseUrl ||
+    (globalThis as any).__DATABASE_URL__ ||
+    process.env.DATABASE_URL_POOLED ||
+    process.env.DATABASE_URL;
+
+  if (!connStr) {
+    if (!prismaClientInstance) {
+      prismaClientInstance = new PrismaClient({
+        log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
+      });
     }
-    return d1ClientInstance;
+    return prismaClientInstance;
   }
-  if (!clientInstance) {
-    clientInstance = new PrismaClient({
+
+  if (!prismaClientInstance || currentConnStr !== connStr) {
+    currentConnStr = connStr;
+    const adapter = new PrismaNeon({ connectionString: connStr });
+    prismaClientInstance = new PrismaClient({
+      adapter,
       log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
     });
   }
-  return clientInstance;
+
+  return prismaClientInstance;
 }
 
 export const prisma = new Proxy({} as PrismaClient, {

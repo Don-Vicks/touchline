@@ -41,7 +41,7 @@ export function matchJson(match: MatchRow, watching = 0) {
     extraMinute: match.extraMinute,
     second: match.second,
     clock: formatClock(match.minute, match.extraMinute, status),
-    kickoffAt: match.kickoffAt.toISOString(),
+    kickoffAt: (match.kickoffAt instanceof Date ? match.kickoffAt : new Date(match.kickoffAt)).toISOString(),
     venue: match.venue,
     venueCity: match.venueCity ?? null,
     referee: match.referee ?? null,
